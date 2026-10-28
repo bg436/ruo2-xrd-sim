@@ -30,12 +30,15 @@
   .cap { font-size: 0.8em; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
   .row.dim { opacity: .35; pointer-events: none; }
   .readout { font-size: 0.85em; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #xrd { cursor: crosshair; }
+  .zoomout { position: absolute; left: 5.2em; top: 2.6em; display: none; border: 1px solid #cfcfd4; background: rgba(255,255,255,.9);
+    border-radius: 6px; padding: 3px 9px; font: inherit; font-size: 13px; color: var(--film); cursor: pointer; }
   .reset { align-self: flex-start; border: 0; background: none; color: var(--film); font: inherit; font-size: .9em; cursor: pointer; padding: 0; }
 </style>
 </head>
 <body>
 <div class="app">
-  <div class="main"><canvas id="xrd"></canvas></div>
+  <div class="main"><canvas id="xrd"></canvas><button class="zoomout" id="zoomout">↺ reset zoom</button></div>
   <div class="side">
     <div class="prof"><canvas id="prof"></canvas></div>
     <div class="ctrl">
@@ -216,8 +219,17 @@ function drawXRD(sim) {
   const fs = Math.max(11, Math.min(18, W / 55));
   const m = { l: fs * 4.2, r: fs * 0.8, t: fs * 2.2, b: fs * 3.2 };
   const pw = W - m.l - m.r, ph = H - m.t - m.b;
-  const sc = cur.sc, x0 = sc.x[0], x1 = sc.x[sc.x.length - 1];
-  const y0 = Math.log10(sc.ymin * 0.5), y1 = Math.log10(sc.ymax * 5);
+  const sc = cur.sc, x0 = view ? view[0] : sc.x[0], x1 = view ? view[1] : sc.x[sc.x.length - 1];
+  let ylo = sc.ymin, yhi = sc.ymax;
+  if (view) {  // fit y to what is visible
+    ylo = Infinity; yhi = 0;
+    const take = v => { if (v > 0) { ylo = Math.min(ylo, v); yhi = Math.max(yhi, v); } };
+    if (S.showData) sc.x.forEach((x, i) => { if (x >= x0 && x <= x1) take(sc.y[i]); });
+    if (S.showSim) cur.grid.forEach((x, i) => { if (x >= x0 && x <= x1) take(cur.scale * sim[i] + cur.bg); });
+    if (!(yhi > 0)) { ylo = sc.ymin; yhi = sc.ymax; }
+  }
+  const y0 = Math.log10(ylo * 0.5), y1 = Math.log10(yhi * 5);
+  plot = { m, pw, ph, x0, x1 };
   const X = x => m.l + (x - x0) / (x1 - x0) * pw, Y = v => m.t + (1 - (Math.log10(v) - y0) / (y1 - y0)) * ph;
   g.clearRect(0, 0, W, H);
   g.font = `${fs}px -apple-system, Helvetica, Arial`; g.textBaseline = 'middle';
@@ -227,11 +239,13 @@ function drawXRD(sim) {
     const y = Y(10 ** e); g.beginPath(); g.moveTo(m.l, y); g.lineTo(m.l + pw, y); g.stroke();
     g.textAlign = 'right'; g.fillText(`10${sup(e)}`, m.l - 6, y);
   }
-  const span = x1 - x0, dt = span > 12 ? 2 : 1;
+  const span = x1 - x0, dt = [5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01].find(d => span / d >= 5) || 0.01;
+  const dec = dt >= 1 ? 0 : dt >= 0.1 ? 1 : 2;
   g.textAlign = 'center';
-  for (let x = Math.ceil(x0 / dt) * dt; x <= x1; x += dt) {
+  for (let k = Math.ceil(x0 / dt - 1e-9); k * dt <= x1 + 1e-9; k++) {
+    const x = k * dt;
     g.beginPath(); g.moveTo(X(x), m.t); g.lineTo(X(x), m.t + ph); g.stroke();
-    g.fillText(x.toFixed(0), X(x), m.t + ph + fs * 0.9);
+    g.fillText(x.toFixed(dec), X(x), m.t + ph + fs * 0.9);
   }
   g.fillStyle = css('--ink');
   g.fillText('2θ (°)', m.l + pw / 2, H - fs * 0.8);
@@ -263,12 +277,18 @@ function drawXRD(sim) {
   g.stroke();
   }
   g.restore();
+  if (drag && drag.x1 !== undefined) {
+    const a = Math.min(drag.x0, drag.x1), b = Math.max(drag.x0, drag.x1);
+    g.fillStyle = 'rgba(42,111,219,0.12)'; g.fillRect(a, m.t, b - a, ph);
+    g.strokeStyle = 'rgba(42,111,219,0.6)'; g.strokeRect(a, m.t, b - a, ph);
+  }
   g.strokeStyle = css('--axis'); g.strokeRect(m.l, m.t, pw, ph);
   // labels for reference lines (above plot)
   g.textAlign = 'center'; g.font = `${fs * 0.85}px -apple-system, Helvetica, Arial`;
   const xs = X(bragg(TIO2.a / 2)), xf = X(bragg(RUO2.a / 2));
-  g.fillStyle = css('--sub'); g.textAlign = 'right'; g.fillText('TiO₂ (200)', xs - 4, m.t - fs * 0.7);
-  g.fillStyle = css('--film'); g.textAlign = 'left'; g.fillText('RuO₂ bulk (200)', xf + 4, m.t - fs * 0.7);
+  const inside = x => x >= m.l && x <= m.l + pw;
+  g.fillStyle = css('--sub'); g.textAlign = 'right'; if (inside(xs)) g.fillText('TiO₂ (200)', xs - 4, m.t - fs * 0.7);
+  g.fillStyle = css('--film'); g.textAlign = 'left'; if (inside(xf)) g.fillText('RuO₂ bulk (200)', xf + 4, m.t - fs * 0.7);
   // legend
   g.font = `${fs}px -apple-system, Helvetica, Arial`; g.textAlign = 'left';
   const lx = m.l + pw - fs * 11, ly = m.t + fs * 1.3;
@@ -337,12 +357,38 @@ function syncUI() {
   $('l_L').textContent = S.profile === 'sigmoid' ? 'transition width' : 'decay length';
 }
 seg($('scans'), SCANS.map((s, i) => [i, s.t + '']), () => S.scan, v => {
-  S.scan = +v; S.t = SCANS[v].t; S.c = S.t / 2; prepScan(S.scan);
+  S.scan = +v; S.t = SCANS[v].t; S.c = S.t / 2; view = null; prepScan(S.scan);
 });
 seg($('profiles'), [['exponential', 'exponential'], ['sigmoid', 'sigmoid'], ['linear', 'linear']], () => S.profile, v => S.profile = v);
 for (const k in sliders) $(k).addEventListener('input', e => { S[k] = +e.target.value; syncUI(); schedule(); });
 for (const b of $('show').children) b.onclick = () => { S[b.dataset.k] = !S[b.dataset.k]; syncUI(); schedule(); };
 $('reset').onclick = () => { Object.assign(S, DEF, { t: SCANS[S.scan].t, c: SCANS[S.scan].t / 2 }); syncUI(); schedule(); };
+
+// zoom: drag across the plot to zoom into a 2θ range, double-click (or the button) to reset
+let view = null, plot = null, drag = null, lastSim = null;
+const xcv = $('xrd');
+const toTth = px => plot.x0 + (px - plot.m.l) / plot.pw * (plot.x1 - plot.x0);
+const localX = e => e.clientX - xcv.getBoundingClientRect().left;
+function setView(v) { view = v; $('zoomout').style.display = view ? 'block' : 'none'; if (lastSim) drawXRD(lastSim); }
+xcv.addEventListener('pointerdown', e => {
+  const x = localX(e);
+  if (!plot || x < plot.m.l || x > plot.m.l + plot.pw) return;
+  drag = { x0: x }; xcv.setPointerCapture(e.pointerId);
+});
+xcv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  drag.x1 = Math.min(Math.max(localX(e), plot.m.l), plot.m.l + plot.pw); drawXRD(lastSim);
+});
+xcv.addEventListener('pointerup', () => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.x1 !== undefined && Math.abs(d.x1 - d.x0) > 6) {
+    const a = toTth(Math.min(d.x0, d.x1)), b = toTth(Math.max(d.x0, d.x1));
+    setView([a, Math.max(b, a + 0.02)]);
+  } else drawXRD(lastSim);
+});
+xcv.addEventListener('dblclick', () => setView(null));
+$('zoomout').onclick = () => setView(null);
 
 let pending = false;
 function schedule() { if (!pending) { pending = true; requestAnimationFrame(render); } }
@@ -350,7 +396,7 @@ function render() {
   pending = false;
   const p = { ...S }, c = cells(p);
   const sim = gsmooth(simulate(cur.P, p).total, cur.step, FWHM);
-  drawXRD(sim); drawProfile(c);
+  lastSim = sim; drawXRD(sim); drawProfile(c);
   const n = c.eps.length, mean = 100 * c.eps.reduce((a, b) => a + b, 0) / n;
   const grad = 100 * (c.eps[n - 1] - c.eps[0]) / Math.max(c.z[n - 1] - c.z[0], 1e-9);
   $('readout').textContent = `⟨ε⟩ = ${mean >= 0 ? '+' : ''}${mean.toFixed(2)} %   ·   mean dε/dz = ${grad >= 0 ? '+' : ''}${grad.toFixed(3)} %/nm`;
