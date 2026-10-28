@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RuO₂ Strain XRD</title>
+<!-- Office.js lets this page run as a PowerPoint content add-in; harmless (and skipped offline) in a normal browser. -->
+<script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 <style>
   :root {
     --bg: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --grid: #ececef; --axis: #9a9aa0;
@@ -355,6 +357,7 @@ function render() {
 }
 window.addEventListener('resize', schedule);
 prepScan(S.scan); syncUI(); schedule();
+if (window.Office) Office.onReady(() => {});
 window._test = { simulate, precompute, DEF, EPS_MATCHED };
 </script>
 </body>
